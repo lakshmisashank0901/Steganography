@@ -26,7 +26,7 @@ export default function InboxPage() {
 
     const fetchInbox = async (authToken: string) => {
         try {
-            const response = await fetch('http://127.0.0.1:8000/api/inbox', {
+            const response = await fetch('/api/inbox', {
                 headers: { 'Authorization': `Bearer ${authToken}` }
             });
             if (response.ok) {
@@ -44,7 +44,7 @@ export default function InboxPage() {
 
     const handleDownload = async (filename: string, originalName: string) => {
         try {
-            const response = await fetch(`http://127.0.0.1:8000/api/uploads/${filename}`);
+            const response = await fetch(`/api/uploads/${filename}`);
             if (response.ok) {
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
@@ -74,7 +74,7 @@ export default function InboxPage() {
         if (!messageToDelete || !token) return;
 
         try {
-            const response = await fetch(`http://127.0.0.1:8000/api/inbox/${messageToDelete}`, {
+            const response = await fetch(`/api/inbox/${messageToDelete}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });

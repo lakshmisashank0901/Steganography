@@ -274,7 +274,7 @@ export default function Home() {
 
   const fetchUserProfile = async (accessToken: string) => {
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/users/me', {
+      const response = await fetch('/api/users/me', {
         headers: { 'Authorization': `Bearer ${accessToken}` }
       });
       if (response.ok) {
@@ -300,7 +300,7 @@ export default function Home() {
       formData.append('username', email);
       formData.append('password', password);
 
-      const response = await fetch('http://127.0.0.1:8000/api/token', {
+      const response = await fetch('/api/token', {
         method: 'POST',
         body: formData,
       });
@@ -336,7 +336,7 @@ export default function Home() {
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/register', {
+      const response = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, first_name: firstName, last_name: lastName })
@@ -444,7 +444,7 @@ export default function Home() {
     const formData = new FormData();
     formData.append('cover_media', file);
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/capacity', { method: 'POST', body: formData });
+      const response = await fetch('/api/capacity', { method: 'POST', body: formData });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail);
       if (data.capacity_bytes > 0) setMediaCapacity(data.capacity_bytes);
@@ -462,7 +462,7 @@ export default function Home() {
         return;
       }
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/key-strength', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+        const res = await fetch('/api/key-strength', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
         if (res.ok) {
           const strength = await res.json();
           updateSecret(secretId, { keyStrength: strength });
@@ -542,14 +542,14 @@ export default function Home() {
         let endpoint = '';
         if (secret.type === 'text') {
           formData.append('message', secret.data.message);
-          endpoint = 'http://127.0.0.1:8000/api/encode-text';
+          endpoint = '/api/encode-text';
         } else if (secret.type === 'file' && secret.data.file) {
           formData.append('secret_file', secret.data.file);
-          endpoint = 'http://127.0.0.1:8000/api/encode-file';
+          endpoint = '/api/encode-file';
         } else if (secret.type === 'password') {
           const passwordData = { type: 'stenography-password-manager-data', website: secret.data.website, username: secret.data.username, password: secret.data.password };
           formData.append('message', JSON.stringify(passwordData, null, 2));
-          endpoint = 'http://127.0.0.1:8000/api/encode-text';
+          endpoint = '/api/encode-text';
         }
 
 
@@ -619,7 +619,7 @@ export default function Home() {
 
     try {
       setProgress(40);
-      const response = await fetch('http://127.0.0.1:8000/api/decode-batch', { method: 'POST', body: formData });
+      const response = await fetch('/api/decode-batch', { method: 'POST', body: formData });
       setProgress(80);
       if (!response.ok) throw new Error((await response.json()).detail);
 
@@ -658,7 +658,7 @@ export default function Home() {
 
     try {
       setProgress(40);
-      const response = await fetch('http://127.0.0.1:8000/api/decode', { method: 'POST', body: formData });
+      const response = await fetch('/api/decode', { method: 'POST', body: formData });
       setProgress(90);
       setCheckStatus(response.ok ? 'success' : 'fail');
     } catch (err: any) {
@@ -693,7 +693,7 @@ export default function Home() {
       formData.append('file', file);
       formData.append('num_secrets', lastEncodedCount.toString());
 
-      const apiResponse = await fetch('http://127.0.0.1:8000/api/save-to-library', {
+      const apiResponse = await fetch('/api/save-to-library', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
@@ -724,7 +724,7 @@ export default function Home() {
 
     try {
       setProgress(50);
-      const response = await fetch('http://127.0.0.1:8000/api/delete', { method: 'POST', body: formData });
+      const response = await fetch('/api/delete', { method: 'POST', body: formData });
 
       if (!response.ok) throw new Error((await response.json()).detail);
 
@@ -754,7 +754,7 @@ export default function Home() {
   const handleRename = async () => {
     if (!selectedLibraryItem || !editedName.trim()) return;
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/library/${selectedLibraryItem.id}`, {
+      const response = await fetch(`/api/library/${selectedLibraryItem.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -778,7 +778,7 @@ export default function Home() {
     if (!selectedLibraryItem) return;
     confirmAction("Delete Image", "Are you sure you want to delete this image? This cannot be undone.", async () => {
       try {
-        const response = await fetch(`http://127.0.0.1:8000/api/library/${selectedLibraryItem.id}`, {
+        const response = await fetch(`/api/library/${selectedLibraryItem.id}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `Bearer ${token}`
@@ -810,7 +810,7 @@ export default function Home() {
     formData.append('file', file);
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/users/me/profile-image', {
+      const response = await fetch('/api/users/me/profile-image', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -836,7 +836,7 @@ export default function Home() {
   const handleDeleteProfileImage = async () => {
     if (!token) return;
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/users/me/profile-image', {
+      const response = await fetch('/api/users/me/profile-image', {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -886,7 +886,7 @@ export default function Home() {
     formData.append('recipient_email', validRecipients.join(','));
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/send-email', {
+      const response = await fetch('/api/send-email', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -955,7 +955,7 @@ export default function Home() {
 
   const handleDecodeFromLibrary = async (item: typeof libraryItems[0]) => {
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/uploads/${item.filename}`);
+      const response = await fetch(`/api/uploads/${item.filename}`);
       if (!response.ok) throw new Error("Failed to fetch file");
       const blob = await response.blob();
       const file = new File([blob], item.filename, { type: blob.type });
@@ -974,7 +974,7 @@ export default function Home() {
   const fetchLibrary = async () => {
     if (!token) return;
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/library', {
+      const response = await fetch('/api/library', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -1010,7 +1010,7 @@ export default function Home() {
                   title={token ? "Profile Menu" : "Login / Sign Up"}
                 >
                   {token && currentUser?.profile_image ? (
-                    <img src={`http://127.0.0.1:8000/api/uploads/${currentUser.profile_image.replace('uploads/', '')}`} alt="Profile" className="w-full h-full object-cover" />
+                    <img src={`/api/uploads/${currentUser.profile_image.replace('uploads/', '')}`} alt="Profile" className="w-full h-full object-cover" />
                   ) : (
                     <User size={20} />
                   )}
@@ -1030,7 +1030,7 @@ export default function Home() {
                           <div className="flex items-center gap-3 mb-3">
                             <div className="relative w-16 h-16 rounded-full overflow-hidden border-2 border-yellow-500 bg-black/50 group">
                               {currentUser.profile_image ? (
-                                <img src={`http://127.0.0.1:8000/api/uploads/${currentUser.profile_image.replace('uploads/', '')}`} alt="Profile" className="w-full h-full object-cover" />
+                                <img src={`/api/uploads/${currentUser.profile_image.replace('uploads/', '')}`} alt="Profile" className="w-full h-full object-cover" />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center text-yellow-500"><User size={32} /></div>
                               )}
@@ -1488,7 +1488,7 @@ export default function Home() {
                           <div key={item.id} onClick={() => setSelectedLibraryItem(item)} className="bg-red-950/40 border border-red-800/50 rounded-lg p-3 hover:border-yellow-500/50 transition-colors group cursor-pointer relative">
                             <div className="aspect-square bg-black/50 rounded mb-2 overflow-hidden relative flex items-center justify-center">
                               {getFileType(item.filename) === 'image' ? (
-                                <img src={`http://127.0.0.1:8000/api/uploads/${item.filename}`} alt={item.filename} className="w-full h-full object-cover" />
+                                <img src={`/api/uploads/${item.filename}`} alt={item.filename} className="w-full h-full object-cover" />
                               ) : getFileType(item.filename) === 'audio' ? (
                                 <Music className="w-12 h-12 text-yellow-500" />
                               ) : (
@@ -1521,7 +1521,7 @@ export default function Home() {
                           <div className="flex gap-4">
                             <div className="w-1/3 flex items-center justify-center bg-black/30 rounded border border-red-800 aspect-square">
                               {getFileType(selectedLibraryItem.filename) === 'image' ? (
-                                <img src={`http://127.0.0.1:8000/api/uploads/${selectedLibraryItem.filename}`} className="rounded w-full h-full object-cover" />
+                                <img src={`/api/uploads/${selectedLibraryItem.filename}`} className="rounded w-full h-full object-cover" />
                               ) : getFileType(selectedLibraryItem.filename) === 'audio' ? (
                                 <Music className="w-24 h-24 text-yellow-500" />
                               ) : (
@@ -1561,7 +1561,7 @@ export default function Home() {
                                 <p className="text-yellow-400 font-bold text-lg">{selectedLibraryItem.num_secrets} <span className="text-xs font-normal text-yellow-200/70">items hidden</span></p>
                               </div>
                               <div className="pt-4 flex flex-col gap-3">
-                                <a href={`http://127.0.0.1:8000/api/uploads/${selectedLibraryItem.filename}`} download={selectedLibraryItem.display_name || selectedLibraryItem.filename} className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500 text-black font-bold rounded hover:bg-yellow-400 transition-colors w-full">
+                                <a href={`/api/uploads/${selectedLibraryItem.filename}`} download={selectedLibraryItem.display_name || selectedLibraryItem.filename} className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500 text-black font-bold rounded hover:bg-yellow-400 transition-colors w-full">
                                   <Save size={18} /> Download {getFileType(selectedLibraryItem.filename) === 'image' ? 'Image' : 'File'}
                                 </a>
                                 <button onClick={() => handleDecodeFromLibrary(selectedLibraryItem)} className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-red-800 text-white font-bold rounded hover:bg-red-700 transition-colors border border-red-600 w-full">

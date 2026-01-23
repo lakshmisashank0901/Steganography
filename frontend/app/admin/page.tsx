@@ -51,7 +51,7 @@ export default function AdminPage() {
 
         try {
             const token = localStorage.getItem('token');
-            const response = await fetch('http://127.0.0.1:8000/api/admin/detect', {
+            const response = await fetch('/api/admin/detect', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -81,7 +81,7 @@ export default function AdminPage() {
             }
 
             try {
-                const response = await fetch('http://127.0.0.1:8000/api/admin/users', {
+                const response = await fetch('/api/admin/users', {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -206,7 +206,7 @@ export default function AdminPage() {
                                                                     <div className="flex items-center gap-3">
                                                                         <div className="w-10 h-10 rounded-full bg-black/60 border border-red-800 overflow-hidden flex items-center justify-center shrink-0">
                                                                             {user.profile_image ? (
-                                                                                <img src={`http://127.0.0.1:8000/api/uploads/${user.profile_image.replace('uploads/', '')}`} className="w-full h-full object-cover" />
+                                                                                <img src={`/api/uploads/${user.profile_image.replace('uploads/', '')}`} className="w-full h-full object-cover" />
                                                                             ) : (
                                                                                 <User size={20} className="text-red-500" />
                                                                             )}

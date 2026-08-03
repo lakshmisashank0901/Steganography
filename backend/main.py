@@ -18,29 +18,18 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.backends import default_backend
 from abc import ABC, abstractmethod
 from pydub import AudioSegment
+from pydub.exceptions import CouldntDecodeError
 from dotenv import load_dotenv
 import base64
 
 import base64
-from sqlalchemy.orm import Session
-from database import SessionLocal, engine, Base
+from database import supabase
 from models import EncodedImage, User, Message
-from auth import get_current_user, get_current_user_optional, create_access_token, get_password_hash, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES
+from auth import get_current_user, get_current_user_optional
 from fastapi.security import OAuth2PasswordRequestForm
 import uuid
 
 load_dotenv()
-
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-# Dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # --- Pydantic Models ---
 class KeyStrengthRequest(BaseModel):
@@ -906,7 +895,6 @@ async def api_decode_batch(media: UploadFile = File(...), keys: str = Form(...))
 async def save_to_library(
     file: UploadFile = File(...),
     num_secrets: int = Form(...),
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
@@ -926,15 +914,18 @@ async def save_to_library(
             f.write(contents)
             
         # Save record to DB
-        db_image = EncodedImage(
-            filename=file.filename, 
-            filepath=file_path, 
-            num_secrets=num_secrets,
-            owner_id=current_user.id
-        )
-        db.add(db_image)
-        db.commit()
-        db.refresh(db_image)
+        insert_data = {
+            "filename": file.filename, 
+            "filepath": file_path, 
+            "num_secrets": num_secrets,
+            "owner_id": current_user.id,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        response = supabase.table("encoded_images").insert(insert_data).execute()
+        if not response.data:
+            raise Exception("Failed to save to database")
+            
+        db_image = EncodedImage(**response.data[0])
         
         return {"id": db_image.id, "filename": db_image.filename, "message": "Saved to library successfully"}
         
@@ -943,10 +934,12 @@ async def save_to_library(
         raise HTTPException(status_code=500, detail=f"Failed to save to library: {e}")
 
 @app.get("/api/library")
-def get_library(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    images = db.query(EncodedImage).filter(EncodedImage.owner_id == current_user.id).order_by(EncodedImage.created_at.desc()).all()
+def get_library(current_user: User = Depends(get_current_user)):
+    response = supabase.table("encoded_images").select("*").eq("owner_id", current_user.id).order("created_at", desc=True).execute()
+    images = response.data
     results = []
-    for img in images:
+    for img_dict in images:
+        img = EncodedImage(**img_dict)
         results.append({
             "id": img.id,
             "filename": os.path.basename(img.filepath), # Actual file on disk (UUID)
@@ -957,21 +950,25 @@ def get_library(db: Session = Depends(get_db), current_user: User = Depends(get_
     return results
 
 @app.put("/api/library/{id}")
-def update_library_item(id: int, request: UpdateFilenameRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    db_image = db.query(EncodedImage).filter(EncodedImage.id == id, EncodedImage.owner_id == current_user.id).first()
-    if not db_image:
+def update_library_item(id: int, request: UpdateFilenameRequest, current_user: User = Depends(get_current_user)):
+    response = supabase.table("encoded_images").select("*").eq("id", id).eq("owner_id", current_user.id).execute()
+    if not response.data:
         raise HTTPException(status_code=404, detail="Image not found")
     
-    db_image.filename = request.filename
-    db.commit()
-    db.refresh(db_image)
+    update_res = supabase.table("encoded_images").update({"filename": request.filename}).eq("id", id).execute()
+    if not update_res.data:
+        raise HTTPException(status_code=500, detail="Failed to update filename")
+        
+    db_image = EncodedImage(**update_res.data[0])
     return {"message": "Filename updated successfully", "filename": db_image.filename}
 
 @app.delete("/api/library/{id}")
-def delete_library_item(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    db_image = db.query(EncodedImage).filter(EncodedImage.id == id, EncodedImage.owner_id == current_user.id).first()
-    if not db_image:
+def delete_library_item(id: int, current_user: User = Depends(get_current_user)):
+    response = supabase.table("encoded_images").select("*").eq("id", id).eq("owner_id", current_user.id).execute()
+    if not response.data:
         raise HTTPException(status_code=404, detail="Image not found")
+    
+    db_image = EncodedImage(**response.data[0])
     
     # Delete from disk
     if os.path.exists(db_image.filepath):
@@ -982,8 +979,7 @@ def delete_library_item(id: int, db: Session = Depends(get_db), current_user: Us
             # Continue to delete DB record even if file deletion fails
             
     # Delete from DB
-    db.delete(db_image)
-    db.commit()
+    supabase.table("encoded_images").delete().eq("id", id).execute()
     return {"message": "Item deleted successfully"}
 
 @app.get("/api/uploads/{filename:path}")
@@ -998,7 +994,6 @@ async def get_uploaded_file(filename: str):
 @app.post("/api/users/me/profile-image")
 async def upload_profile_image(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
@@ -1021,20 +1016,16 @@ async def upload_profile_image(
             f.write(contents)
             
         # Update user profile
-        # Use db.merge to ensure the object is attached to the current session
-        user_to_update = db.merge(current_user)
-        user_to_update.profile_image = f"profiles/{filename}"
-        db.commit()
-        db.refresh(user_to_update)
+        new_profile_image = f"profiles/{filename}"
+        supabase.table("users").update({"profile_image": new_profile_image}).eq("id", current_user.id).execute()
         
-        return {"message": "Profile image updated successfully", "profile_image": user_to_update.profile_image}
+        return {"message": "Profile image updated successfully", "profile_image": new_profile_image}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {e}")
 
 @app.delete("/api/users/me/profile-image")
 async def delete_profile_image(
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     if not current_user.profile_image:
@@ -1049,12 +1040,9 @@ async def delete_profile_image(
         raise HTTPException(status_code=500, detail=f"Failed to delete image file: {e}")
 
     # Remove from DB
-    user_to_update = db.merge(current_user)
-    user_to_update.profile_image = None
-    db.commit()
-    db.refresh(user_to_update)
+    supabase.table("users").update({"profile_image": None}).eq("id", current_user.id).execute()
 
-    return {"message": "Profile image deleted successfully"}
+    return {"message": "Profile image removed successfully"}
 
 # --- Admin Endpoints ---
 def get_current_admin_user(current_user: User = Depends(get_current_user)):
@@ -1064,11 +1052,10 @@ def get_current_admin_user(current_user: User = Depends(get_current_user)):
 
 @app.get("/api/admin/users", response_model=list[UserOut])
 def get_all_users(
-    db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_admin_user)
 ):
-    users = db.query(User).all()
-    return users
+    response = supabase.table("users").select("*").execute()
+    return response.data
 
 @app.post("/api/admin/detect")
 async def api_admin_detect(
@@ -1122,43 +1109,62 @@ async def api_admin_detect(
 
 
 @app.post("/api/register", response_model=Token)
-def register(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+def register(user: UserCreate):
+    try:
+        auth_response = supabase.auth.sign_up({
+            "email": user.email,
+            "password": user.password,
+            "options": {
+                "data": {
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                }
+            }
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    # Store user in local DB so foreign keys work
+    user_resp = supabase.table("users").select("*").eq("email", user.email).execute()
+    if not user_resp.data:
+        supabase.table("users").insert({
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "hashed_password": ""
+        }).execute()
     
-    hashed_password = get_password_hash(user.password)
-    new_user = User(
-        email=user.email, 
-        hashed_password=hashed_password,
-        first_name=user.first_name,
-        last_name=user.last_name
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    access_token = create_access_token(data={"sub": new_user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
+    session = auth_response.session
+    if not session:
+         raise HTTPException(status_code=400, detail="Registration requires email confirmation. Check your inbox.")
+    return {"access_token": session.access_token, "token_type": "bearer"}
 
 @app.post("/api/token", response_model=Token)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == form_data.username).first()
-    if not user:
-         raise HTTPException(
-            status_code=404, # Specific code for user not found to trigger frontend redirect
-            detail="User not found",
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    try:
+        auth_response = supabase.auth.sign_in_with_password({
+            "email": form_data.username,
+            "password": form_data.password
+        })
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
         
-    if not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token = create_access_token(data={"sub": user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
+    # Ensure user exists locally for foreign keys (in case created on Supabase directly)
+    user_resp = supabase.table("users").select("*").eq("email", form_data.username).execute()
+    if not user_resp.data:
+        user_meta = auth_response.user.user_metadata if auth_response.user else {}
+        supabase.table("users").insert({
+            "email": form_data.username,
+            "first_name": user_meta.get("first_name", "User"),
+            "last_name": user_meta.get("last_name", ""),
+            "hashed_password": ""
+        }).execute()
+
+    return {"access_token": auth_response.session.access_token, "token_type": "bearer"}
 
 @app.get("/api/users/me", response_model=UserOut)
 async def read_users_me(current_user: User = Depends(get_current_user)):
@@ -1172,8 +1178,7 @@ def read_root():
 async def api_send_email(
     file: UploadFile = File(...),
     recipient_email: str = Form(...),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user)
 ):
     # 1. Parse recipients
     recipient_emails = [e.strip() for e in recipient_email.split(',') if e.strip()]
@@ -1196,10 +1201,11 @@ async def api_send_email(
 
         for target_email in recipient_emails:
             # 3. Verify recipient
-            recipient = db.query(User).filter(User.email == target_email).first()
-            if not recipient:
+            recipient_resp = supabase.table("users").select("*").eq("email", target_email).execute()
+            if not recipient_resp.data:
                 failed_sends.append(f"{target_email} (User not found)")
                 continue
+            recipient = User(**recipient_resp.data[0])
 
             # 4. Prepare Metadata (Unique per user)
             transfer_metadata = {
@@ -1232,17 +1238,16 @@ async def api_send_email(
                 buffer.write(encoded_bytes)
 
             # 7. Create Message Record
-            new_message = Message(
-                sender_id=current_user.id,
-                recipient_id=recipient.id,
-                filename=file.filename,
-                filepath=filename
-            )
-            db.add(new_message)
+            supabase.table("messages").insert({
+                "sender_id": current_user.id,
+                "recipient_id": recipient.id,
+                "filename": file.filename,
+                "filepath": filename,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }).execute()
+            
             successful_sends.append(target_email)
             
-        db.commit() # Commit all messages
-
         if not successful_sends:
             # If all failed, return error
             msg = f"Failed to send. {', '.join(failed_sends)}"
@@ -1262,57 +1267,65 @@ async def api_send_email(
 
 @app.get("/api/inbox")
 async def api_inbox(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user)
 ):
-    messages = db.query(Message).filter(Message.recipient_id == current_user.id).order_by(Message.timestamp.desc()).all()
+    msg_resp = supabase.table("messages").select("*").eq("recipient_id", current_user.id).order("timestamp", desc=True).execute()
+    messages = msg_resp.data
+    
+    if not messages:
+        return []
+        
+    sender_ids = list(set([m["sender_id"] for m in messages]))
+    users_resp = supabase.table("users").select("id, email, first_name, last_name").in_("id", sender_ids).execute()
+    users_dict = {u["id"]: u for u in users_resp.data}
     
     result = []
     for msg in messages:
+        sender = users_dict.get(msg["sender_id"])
+        if not sender: continue
+        
         result.append({
-            "id": msg.id,
-            "sender_email": msg.sender.email,
-            "sender_name": f"{msg.sender.first_name} {msg.sender.last_name}",
-            "filename": msg.filename,
-            "stored_filename": msg.filepath,
-            "timestamp": msg.timestamp.isoformat(),
-            "is_read": msg.is_read
+            "id": msg["id"],
+            "sender_email": sender["email"],
+            "sender_name": f"{sender.get('first_name','')} {sender.get('last_name','')}".strip(),
+            "filename": msg["filename"],
+            "stored_filename": msg["filepath"],
+            "timestamp": msg["timestamp"],
+            "is_read": msg["is_read"]
         })
     return result
 
 @app.post("/api/inbox/{message_id}/read")
 async def api_mark_read(
     message_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user)
 ):
-    msg = db.query(Message).filter(Message.id == message_id, Message.recipient_id == current_user.id).first()
-    if not msg:
+    msg_resp = supabase.table("messages").select("*").eq("id", message_id).eq("recipient_id", current_user.id).execute()
+    if not msg_resp.data:
         raise HTTPException(status_code=404, detail="Message not found")
     
-    msg.is_read = True
-    db.commit()
+    supabase.table("messages").update({"is_read": True}).eq("id", message_id).execute()
     return {"status": "success"}
 
 @app.delete("/api/inbox/{message_id}")
 async def api_delete_message(
     message_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user)
 ):
-    msg = db.query(Message).filter(Message.id == message_id, Message.recipient_id == current_user.id).first()
-    if not msg:
+    msg_resp = supabase.table("messages").select("*").eq("id", message_id).eq("recipient_id", current_user.id).execute()
+    if not msg_resp.data:
         raise HTTPException(status_code=404, detail="Message not found")
     
+    msg = msg_resp.data[0]
+    
     # Optional: Delete the actual file if we want to save space
-    if msg.filepath:
+    if msg.get("filepath"):
         try:
-            full_path = os.path.join(UPLOAD_DIR, msg.filepath)
+            full_path = os.path.join(UPLOAD_DIR, msg["filepath"])
             if os.path.exists(full_path):
                 os.remove(full_path)
         except Exception as e:
-            print(f"Error deleting file {msg.filepath}: {e}")
+            print(f"Error deleting file {msg['filepath']}: {e}")
             
-    db.delete(msg)
-    db.commit()
+    supabase.table("messages").delete().eq("id", message_id).execute()
     return {"status": "success", "message": "Message deleted"}

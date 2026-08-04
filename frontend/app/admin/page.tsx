@@ -225,7 +225,17 @@ export default function AdminPage() {
                                                                     )}
                                                                 </td>
                                                                 <td className="p-4 text-center">
-                                                                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+                                                                    {user.last_active && (!user.logout_time || new Date(user.last_active).getTime() > new Date(user.logout_time).getTime()) && (new Date().getTime() - new Date(user.last_active).getTime()) < 5 * 60 * 1000 ? (
+                                                                        <div className="flex flex-col items-center gap-1">
+                                                                            <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse"></span>
+                                                                            <span className="text-[10px] text-emerald-500 font-medium tracking-wider uppercase">Online</span>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="flex flex-col items-center gap-1">
+                                                                            <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-600"></span>
+                                                                            <span className="text-[10px] text-gray-500 font-medium tracking-wider uppercase">Offline</span>
+                                                                        </div>
+                                                                    )}
                                                                 </td>
                                                             </tr>
                                                         ))}

@@ -292,6 +292,26 @@ export default function Home() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!token) return;
+    
+    const sendHeartbeat = async () => {
+      try {
+        await fetch('/api/users/me/heartbeat', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      } catch (e) {
+        console.error("Heartbeat failed", e);
+      }
+    };
+    
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 2 * 60 * 1000); // 2 minutes
+    
+    return () => clearInterval(interval);
+  }, [token]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -362,7 +382,15 @@ export default function Home() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (token) {
+        try {
+            await fetch('/api/users/me/logout', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+        } catch (e) { console.error(e); }
+    }
     setToken(null);
     localStorage.removeItem('token');
     setLibraryItems([]); // Clear library data from UI

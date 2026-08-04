@@ -10,6 +10,8 @@ class User(BaseModel):
     hashed_password: Optional[str] = None
     profile_image: Optional[str] = None
     is_admin: bool = False
+    last_active: Optional[datetime] = None
+    logout_time: Optional[datetime] = None
 
 class EncodedImage(BaseModel):
     id: int

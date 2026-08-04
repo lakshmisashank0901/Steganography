@@ -54,6 +54,8 @@ class UserOut(BaseModel):
     last_name: str
     profile_image: str | None = None
     is_admin: bool = False
+    last_active: datetime.datetime | None = None
+    logout_time: datetime.datetime | None = None
     
     class Config:
         orm_mode = True
@@ -1002,6 +1004,22 @@ async def get_uploaded_file(filename: str):
 
 # --- Auth Endpoints ---
 
+@app.post("/api/users/me/heartbeat")
+async def user_heartbeat(current_user: User = Depends(get_current_user)):
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    supabase.table("users").update({"last_active": now}).eq("id", current_user.id).execute()
+    return {"status": "ok"}
+
+@app.post("/api/users/me/logout")
+async def user_logout(current_user: User = Depends(get_current_user)):
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    # Set logout_time and clear last_active
+    supabase.table("users").update({
+        "logout_time": now,
+        "last_active": None
+    }).eq("id", current_user.id).execute()
+    return {"status": "ok"}
+
 @app.post("/api/users/me/profile-image")
 async def upload_profile_image(
     file: UploadFile = File(...),
@@ -1063,7 +1081,11 @@ def get_all_users(
     current_user: User = Depends(get_current_admin_user)
 ):
     response = supabase.table("users").select("*").execute()
-    return response.data
+    users = response.data
+    for u in users:
+        if u.get("is_admin") is None:
+            u["is_admin"] = False
+    return users
 
 @app.post("/api/admin/detect")
 async def api_admin_detect(

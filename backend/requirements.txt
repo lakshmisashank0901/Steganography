@@ -11,4 +11,4 @@ python-jose[cryptography]
 passlib[argon2]
 argon2-cffi
 psycopg2-binary
-supabase
+supabasepyaudioop

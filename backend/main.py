@@ -1,4 +1,5 @@
 import io
+import asyncio
 import datetime
 import hashlib
 import json
@@ -903,20 +904,19 @@ async def save_to_library(
         # Generate unique filename
         file_ext = file.filename.split('.')[-1]
         unique_filename = f"{uuid.uuid4()}.{file_ext}"
-        upload_dir = "uploads"
-        file_path = os.path.join(upload_dir, unique_filename)
         
-        # Ensure directory exists (just in case)
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        # Save file to disk
-        with open(file_path, "wb") as f:
-            f.write(contents)
+        # Upload to Supabase Storage (in a background thread to prevent blocking the event loop)
+        await asyncio.to_thread(
+            supabase.storage.from_("uploads").upload,
+            path=unique_filename,
+            file=contents,
+            file_options={"content-type": file.content_type}
+        )
             
         # Save record to DB
         insert_data = {
             "filename": file.filename, 
-            "filepath": file_path, 
+            "filepath": unique_filename, 
             "num_secrets": num_secrets,
             "owner_id": current_user.id,
             "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -970,12 +970,12 @@ def delete_library_item(id: int, current_user: User = Depends(get_current_user))
     
     db_image = EncodedImage(**response.data[0])
     
-    # Delete from disk
-    if os.path.exists(db_image.filepath):
+    # Delete from Supabase storage
+    if db_image.filepath:
         try:
-            os.remove(db_image.filepath)
+            supabase.storage.from_("uploads").remove([db_image.filepath])
         except Exception as e:
-            print(f"Error removing file: {e}")
+            print(f"Error removing file from storage: {e}")
             # Continue to delete DB record even if file deletion fails
             
     # Delete from DB
@@ -984,10 +984,21 @@ def delete_library_item(id: int, current_user: User = Depends(get_current_user))
 
 @app.get("/api/uploads/{filename:path}")
 async def get_uploaded_file(filename: str):
-    file_path = os.path.join("uploads", filename)
-    if os.path.exists(file_path):
-        return FileResponse(file_path)
-    raise HTTPException(status_code=404, detail="File not found")
+    try:
+        res = supabase.storage.from_("uploads").download(filename)
+        
+        ext = filename.split('.')[-1].lower()
+        content_type = "application/octet-stream"
+        if ext in ['png', 'jpg', 'jpeg']:
+            content_type = f"image/{ext}"
+            if ext == 'jpg': content_type = "image/jpeg"
+        elif ext == 'wav':
+            content_type = "audio/wav"
+            
+        return Response(content=res, media_type=content_type)
+    except Exception as e:
+        print(f"File download error: {e}")
+        raise HTTPException(status_code=404, detail="File not found")
 
 # --- Auth Endpoints ---
 
@@ -1001,25 +1012,24 @@ async def upload_profile_image(
         if not file.content_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="File must be an image")
             
-        # Create uploads directory if not exists
-        upload_dir = "uploads/profiles"
-        os.makedirs(upload_dir, exist_ok=True)
-        
         # Generate unique filename
         file_ext = file.filename.split('.')[-1]
         filename = f"user_{current_user.id}_{uuid.uuid4()}.{file_ext}"
-        file_path = os.path.join(upload_dir, filename)
+        path = f"profiles/{filename}"
         
-        # Save file
+        # Save file to Supabase Storage (in a background thread to prevent blocking)
         contents = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(contents)
+        await asyncio.to_thread(
+            supabase.storage.from_("uploads").upload,
+            path=path, 
+            file=contents, 
+            file_options={"content-type": file.content_type}
+        )
             
         # Update user profile
-        new_profile_image = f"profiles/{filename}"
-        supabase.table("users").update({"profile_image": new_profile_image}).eq("id", current_user.id).execute()
+        supabase.table("users").update({"profile_image": path}).eq("id", current_user.id).execute()
         
-        return {"message": "Profile image updated successfully", "profile_image": new_profile_image}
+        return {"message": "Profile image updated successfully", "profile_image": path}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {e}")
@@ -1032,10 +1042,8 @@ async def delete_profile_image(
         raise HTTPException(status_code=404, detail="Profile image not found")
 
     try:
-        # Construct absolute path safely
-        file_path = os.path.join("uploads", current_user.profile_image)
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        # Delete from Supabase storage
+        supabase.storage.from_("uploads").remove([current_user.profile_image])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete image file: {e}")
 
@@ -1232,10 +1240,13 @@ async def api_send_email(
             elif content_type == 'audio/wav' and not filename.endswith('.wav'):
                 filename += '.wav'
                 
-            filepath = os.path.join(UPLOAD_DIR, filename)
-            
-            with open(filepath, "wb") as buffer:
-                buffer.write(encoded_bytes)
+            # Upload to Supabase Storage (in a background thread to prevent blocking)
+            await asyncio.to_thread(
+                supabase.storage.from_("uploads").upload,
+                path=filename,
+                file=encoded_bytes,
+                file_options={"content-type": content_type}
+            )
 
             # 7. Create Message Record
             supabase.table("messages").insert({
@@ -1321,9 +1332,7 @@ async def api_delete_message(
     # Optional: Delete the actual file if we want to save space
     if msg.get("filepath"):
         try:
-            full_path = os.path.join(UPLOAD_DIR, msg["filepath"])
-            if os.path.exists(full_path):
-                os.remove(full_path)
+            supabase.storage.from_("uploads").remove([msg["filepath"]])
         except Exception as e:
             print(f"Error deleting file {msg['filepath']}: {e}")
             
